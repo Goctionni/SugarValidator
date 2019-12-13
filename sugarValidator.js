@@ -58,7 +58,9 @@ while(true) {
 }
 
 function throwError(msg, passage) {
-    console.log(msg, passage.header);
+    console.log('\x1b[31m' + passage.header + '\x1b[0m');
+    console.log(msg.replace(/\n/g, '\\n').replace(/\t/g, '\\t'));
+    console.log('');
     throw 'Error';
 }
 
@@ -68,11 +70,10 @@ function matchGTLT(html, passage) {
         const end = html.indexOf('>>', start);
         if (start === -1 && end === -1) return;
         if (start === -1 || end === -1) {
-            if (start !== -1) console.log(html.substr(start, 40));
-            if (end !== -1) console.log(html.substr(end - 20, 40));
-
-            throwError('Mismatch found in << >> in passage', passage);
-            throw 'Error';
+            let partial;
+            if (start !== -1) partial = html.substr(start, 40);
+            if (end !== -1) partial =  html.substr(end - 20, 40);
+            return throwError(`Mismatch found in << >> in passage (${partial})`, passage);
         }
         html = html.substr(0, start) + html.substr(end + 2);
     }
@@ -112,10 +113,14 @@ function matchIfs(html, passage) {
     }
 }
 
+let errorsFound = false;
 for(const passage of passages) {
-    break;
     try {
         matchGTLT(passage.content, passage);
         matchIfs(passage.content, passage);
-    } catch { }
+    } catch {
+        errorsFound = true;
+    }
 }
+
+console.log(`sugarValidator has finished ${errorsFound ? 'with' : 'without'} errors`);
