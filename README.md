@@ -2,7 +2,7 @@
 Validates SugarCube games, find bugs quickly and easily
 
 ## Description
-This is a validator made for SugarCube games. It takes your game's HTML file as input, collects all passages from the game and does some basic validation checks to check that `<<` and `>>` are matched correctly, and that the `<<if>>` `<<elseif>>` `<<else>>` <</if>>` are structured correctly.
+This is a validator made for SugarCube games. It takes your game's HTML file as input, collects all passages from the game and does some basic validation checks to check that `<<` and `>>` are matched correctly, and that the `<<if>>` `<<elseif>>` `<<else>>` `<</if>>` are structured correctly.
 
 Most SugarCube games will ship with a few of these types of errors. Now you can easily check for them and fix them before your users do.
 
