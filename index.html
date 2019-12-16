@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>sugarValidator</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <style>
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
+            background-color: #333;
+            color: #DDD;
+        }
+        body::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 100px;
+            height: 100px;
+            margin: -50px;
+            border: solid 10px;
+            border-color: #FFF transparent transparent transparent;
+            border-radius: 50%;
+            animation: spin 1s linear 0s infinite;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .4s ease-in-out;
+        }
+        .dropzone {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-evenly;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            transition: all .4s ease-in-out;
+        }
+        .dropzone img {
+            max-height: calc(100vh - 30vw);
+            max-width: 60vw;
+        }
+        .dropzone span {
+            font-variant: small-caps;
+            font-size: 4vw;
+            text-align: center;
+        }
+        .loading .dropzone {
+            filter: blur(10px);
+        }
+        .show-results .dropzone {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loading::after {
+            opacity: 1;
+        }
+        .results {
+            box-sizing: border-box;
+            position: absolute;
+            background-color: #222;
+            width: 100vw;
+            height: 100vh;
+            top: 0;
+            left: 0;
+            transform: translateY(100vh);
+            pointer-events: none;
+            overflow-y: auto;
+            transition: all .4s ease-in-out;
+            padding: 20px;
+        }
+        .show-results .results {
+            transform: translateY(0);
+            pointer-events: all;
+        }
+        h2 {
+            margin-top: 0;
+        }
+        .close {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 60px;
+            height: 60px;
+            font-size: 60px;
+            line-height: 60px;
+            text-align: center;
+            border: 0;
+            background: transparent;
+            color: #DDD;
+            font-weight: bold;
+            cursor: pointer;
+            outline: 0;
+        }
+        .close:hover {
+            color: #FFF;
+        }
+        .file {
+            padding-left: 20px;
+        }
+        .file-errors,
+        .file-warnings {
+            margin-bottom: 20px;
+        }
+        .file-errors.no-errors {
+            color: #090;
+        }
+        h3 {
+            margin: 0;
+        }
+        h4 {
+            margin: 10px 0 0;
+        }
+        .error + .error,
+        .warning + .warning {
+            margin-top: 15px;
+        }
+        h5.error-title {
+            margin: 0;
+            font-family: monospace;
+            color: #F55;
+        }
+        p.error-message {
+            font-family: monospace;
+            margin: .3em 0;
+        }
+        h5.warning-title {
+            margin: 0;
+            font-family: monospace;
+            color: #FC0;
+        }
+        p.error-message,
+        p.warning-line {
+            font-family: monospace;
+            margin: .3em 0;
+            white-space: nowrap;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .warning-group {
+            display: flex;
+            flex-direction: column-reverse;
+            margin: .3em 0;
+        }
+        .warning-line:not(:last-child) {
+            opacity: .5;
+        }
+        p.warning-line {
+            margin: 0;
+        }
+        .token {
+            color: #FFF;
+        }
+    </style>
+</head>
+<body>
+    <div class="dropzone">
+        <img src="./files/fileIcon.svg">
+        <span>
+            Drag and Drop your<br>
+            SugarCube gamefile here
+        </span>
+    </div>
+    <div class="results">
+        <h2>Results</h2>
+        <button class="close">&times;</button>
+        <div class="files"></div>
+    </div>
+    <script>
+        const _closeResultsBtn = document.querySelector('.close');
+        _closeResultsBtn.addEventListener('click', () => {
+            document.body.classList.remove('show-results');
+        });
+
+        const htmlEncode = (string) => {
+            const _el = document.createElement('div');
+            _el.appendChild(document.createTextNode(string));
+            return _el.innerHTML;
+        };
+
+        const _dropzone = document.querySelector('.dropzone');
+        const _files = document.querySelector('.files');
+        const validate = (fileData) => {
+            return new Promise((resolve, reject) => {
+                const worker = new Worker('./files/validationWorker.js');
+                worker.onerror = (error) => {
+                    reject(error);
+                    worker.terminate();
+                };
+                worker.onmessage = (result) => {
+                    resolve(result.data);
+                    worker.terminate();
+                };
+                worker.postMessage(fileData);
+            });
+        };
+
+        const clearFilesContainer = () => {
+            while(_files.firstChild) {
+                _files.removeChild(_files.firstChild);
+            }
+        }
+
+        _dropzone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+        });
+
+        _dropzone.addEventListener('drop', async (event) => {
+            event.preventDefault();
+            document.body.classList.add('loading');
+            clearFilesContainer();
+            const results = await Promise.all(
+                Array.from(event.dataTransfer.items)
+                    .filter((item) => item.kind === 'file')
+                    .map((item) => item.getAsFile())
+                    .filter((file) => ['htm', 'html'].indexOf(file.name.split('.').pop()) !== -1)
+                    .map((file) => new Promise(async (resolve, reject) => {
+                        const fileData = await file.text();
+                        const result = await validate(fileData);
+                        resolve({ file, fileData, result });
+                    }))
+            );
+
+            document.body.classList.remove('loading');
+            document.body.classList.add('show-results');
+            
+            for (const result of results) {
+                const _file = document.createElement('div');
+                _file.classList.add('file');
+                _files.appendChild(_file);
+                const _title = document.createElement('h3');
+                _title.appendChild(document.createTextNode(result.file.name));
+                _file.appendChild(_title);
+
+                const _errors = document.createElement('div');
+                _errors.classList.add('file-errors');
+                _file.appendChild(_errors);
+                const _errorsTitle = document.createElement('h4');
+                _errorsTitle.classList.add('errors-title');
+                _errorsTitle.appendChild(document.createTextNode('Errors'));
+                _errors.append(_errorsTitle);
+                
+                const _warnings = document.createElement('div');
+                _warnings.classList.add('file-warnings');
+                _file.appendChild(_warnings);
+                const _warningsTitle = document.createElement('h4');
+                _warningsTitle.classList.add('warnings-title');
+                _warningsTitle.appendChild(document.createTextNode('Warnings'));
+                _warnings.append(_warningsTitle);
+                
+                const { errors, warnings } = result.result;
+
+                // Show errors
+                const errorPassages = Object.keys(errors);
+                if (errorPassages.length === 0) {
+                    _errors.classList.add('no-errors');
+                    _errors.appendChild(document.createTextNode('No errors were found!'));
+                } else {
+                    for (const passage of errorPassages) {
+                        const error = errors[passage];
+                        const _error = document.createElement('div');
+                        _error.classList.add('error');
+                        _errors.appendChild(_error);
+                        const _errorTitle = document.createElement('h5');
+                        _errorTitle.classList.add('error-title');
+                        _errorTitle.appendChild(document.createTextNode(passage));
+                        _error.appendChild(_errorTitle);
+                        const _errorMessage = document.createElement('p');
+                        _errorMessage.classList.add('error-message');
+                        _errorMessage.appendChild(document.createTextNode(error));
+                        _error.appendChild(_errorMessage);
+                    }
+                }
+
+                // Show warnings
+                const warningTitles = Object.keys(warnings);
+                if (warningTitles.length === 0) {
+                    _warnings.classList.add('no-warnings');
+                    _warnings.appendChild(document.createTextNode('No warnings were found!'));
+
+                } else {
+                    for (const warningTitle of warningTitles) {
+                        const _warning = document.createElement('div');
+                        _warning.classList.add('warning');
+                        _warnings.appendChild(_warning);
+                        const _warningTitle = document.createElement('h5');
+                        _warningTitle.classList.add('warning-title');
+                        _warningTitle.appendChild(document.createTextNode(warningTitle));
+                        _warning.appendChild(_warningTitle);
+                        // [
+                        //    [["Deprecated markup found in passage ('$$1' should be '$$2')","<<click","<<link"]],
+                        //    [["Deprecated markup found in passage ('$$1' should be '$$2')","<</click>>","<</link>>"]]
+                        // ]
+                        const warningsGroup = warnings[warningTitle];
+                        for (const warningLines of warningsGroup) {
+                            const _warningGroup = document.createElement('div');
+                            _warningGroup.classList.add('warning-group');
+                            _warning.appendChild(_warningGroup);
+                            for (const warningLine of warningLines) {
+                                const [ message, ... args ] = warningLine;
+                                console.log({warningLine, message, args});
+                                let html = htmlEncode(message);
+                                for (let i = 0; i < args.length; i++) {
+                                    const tokenKey = `$$${i + 1}`;
+                                    const _el = document.createElement('span');
+                                    _el.classList.add('token');
+                                    _el.appendChild(document.createTextNode(args[i]));
+                                    html = html.replace(new RegExp('\\$\\$' + (i + 1), 'g'), _el.outerHTML);
+                                }
+                                const _warningLine = document.createElement('p');
+                                _warningLine.classList.add('warning-line');
+                                _warningLine.innerHTML = html;
+                                _warningGroup.appendChild(_warningLine);
+                            }
+                        }
+                    }
+                }
+                console.log({ result });
+            }
+        });
+    </script>
+</body>
+</html>
