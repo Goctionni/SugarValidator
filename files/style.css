@@ -1,0 +1,62 @@
+.type-game,
+.type-game * {
+  box-sizing: border-box;
+}
+.type-game {
+  position: relative;
+  max-width: 600px;
+}
+.type-game-status {
+  text-align: center;
+  font-size: 40px;
+  background-color: #666;
+  height: 1.5em;
+  line-height: 1.5em;
+}
+.type-game .type-game-area {
+  position: relative;
+  height: 300px;
+  border: solid #666 2px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.type-game .flash {
+  position: absolute;
+  width: 100%;
+  height: 300px;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 200px rgba(255,0,0,.25);
+  border: solid #F00 2px;
+}
+.type-game .flash.show {
+  animation: flash .2s ease-in-out 0s 1;
+}
+.type-game-char {
+  position: absolute;
+  font-size: 70px;
+  height: 70px;
+  width: 70px;
+  color: #FFF;
+  text-transform: uppercase;
+  font-family: monospace;
+  opacity: 0;
+  animation: flash .3s ease-in-out 0s 1;
+}
+.type-game .continue-button-container {
+  display: none;
+}
+
+@keyframes flash {
+  0% {
+	opacity: 0;
+  }
+  10% {
+	opacity: 1;
+  }
+  100% {
+	opacity: 0;
+  }
+}
