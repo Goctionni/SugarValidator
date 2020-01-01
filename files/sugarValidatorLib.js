@@ -49,6 +49,7 @@ function validate(fileData) {
         ['<nowiki>', '</nowiki>', 'Markup escape'],
         ['{{{', '}}}', 'Markup escape'],
         ['/*', '*/', 'Markup escape'],
+        ['/%', '%/', 'Markup escape'],
         ['<!--', '-->', 'Markup escape'],
         ['<<script>>', '<</script>>', 'Script']
     ];
@@ -226,7 +227,7 @@ function validate(fileData) {
             '<<stopallaudio>>': '<<audio ":all" stop>>',
             '<<display': '<<include',
             '<<forget': 'forget()',
-            '<<remember': 'memorize() or recall()',
+            '<<remember': `memorize()' and 'recall()`,
             'state.active.variables': 'State.variables',
             'State.initPRNG(': 'State.prng.init(',
             '.containsAll(': '.includesAll(',
@@ -258,6 +259,13 @@ function validate(fileData) {
                 const startIndex = fileData.indexOf(key, curIndex);
                 if (startIndex === -1) break;
                 if (startIndex >= maxIndex) break;
+                if (key === 'macros.') { // Special case, ignore if this is not stand-alone
+                    const precedingChar = fileData.substr(startIndex - 1, 1);
+                    if (precedingChar.match(/[\._a-z0-9]/i)) {
+                        curIndex = startIndex + key.length;
+                        continue;
+                    }
+                }
                 const endOfLineIndex = fileData.indexOf('\n', startIndex);
                 const lines = fileData.substring(0, endOfLineIndex).split('\n');
                 const line = lines[lines.length - 1].trim();
@@ -279,12 +287,14 @@ function validate(fileData) {
         cycle: { closed: true, sub: [ 'option', 'optionsfrom ']},
         listbox: { closed: true, sub: [ 'option', 'optionsfrom ']},
         timed: { closed: true, sub: [ 'next' ]},
+        createaudiogroup: { closed: true, sub: [ 'track' ]},
+        createplaylist: { closed: true, sub: [ 'track' ]},
     };
     function addSimpleMacro(name, closed) {
         allMacros[name] = { closed, sub: closed ? [] : undefined };
     }
     // Closed
-    ['capture', 'script', 'nobr', 'silently', 'button', 'link', 'linkappend', 'linkprepend', 'linkreplace', 'append', 'prepend', 'replace', 'createaudiogroup', 'createplaylist', 'widget'].forEach((name) => addSimpleMacro(name, true));
+    ['capture', 'script', 'nobr', 'silently', 'button', 'link', 'linkappend', 'linkprepend', 'linkreplace', 'append', 'prepend', 'replace', 'widget'].forEach((name) => addSimpleMacro(name, true));
     // Unclosed
     ['set', 'unset', 'run', '=', '-', 'include', 'print', 'checkbox', 'radiobutton', 'textarea', 'textbox', 'actions', 'back', 'choice', 'return', 'addclass'].forEach((name) => addSimpleMacro(name, false));
     ['copy', 'remove', 'removeclass', 'toggleclass', 'audio', 'cacheaudio', 'playlist', 'masteraudio', 'removeplaylist', 'waitforaudio', 'goto'].forEach((name) => addSimpleMacro(name, false));
@@ -357,6 +367,7 @@ function validate(fileData) {
     }
 
     const excludeTags = ['if', 'else', 'elseif', 'endif', 'click', 'endclick', 'endnobr', 'endsilently', 'endfor', 'endscript', 'endbutton', 'endappend', 'endprepend', 'endreplace', 'endwidget', 'setplaylist', 'stopallaudio', 'display', 'remember', 'forget'];
+    const excludePrefix = ['/', '-', '='];
     function findAllTags(html, passage) {
         let ignoreTagInRange = [];
         let startIndex = 0;
@@ -364,8 +375,11 @@ function validate(fileData) {
             const index = html.indexOf('<<', startIndex);
             if (index === -1) return;
             const tagName = html.substr(index + 2).split(' ').shift().split('>').shift().split('\n').shift();
-            if (tagName[0] !== '/' && excludeTags.indexOf(tagName) === -1) {
-                if (!ignoreTagInRange.some((item) => item.tag === tagname && index > item.range[0] && index < item.range[1])) {
+            if (excludePrefix.indexOf(tagName[0]) === -1 && excludeTags.indexOf(tagName) === -1) {
+                if (tagName[0] === '$' || tagName[0] === '_') {
+                    return throwError(`Found '<<${tagName}'. Though this doesn't cause errors directly in the game, something else was almost certainly intended (ie: '<<=${tagname}')`, passage);
+                }
+                else if (!ignoreTagInRange.some((item) => item.tag === tagname && index > item.range[0] && index < item.range[1])) {
                     const closeTagIndex = html.substr(index).indexOf('<</' + tagName + '>>');
                     const isClosed = closeTagIndex !== -1;
                     const isWidget = allWidgets.indexOf(tagName) !== -1;
