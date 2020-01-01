@@ -190,7 +190,7 @@
             return _el.innerHTML;
         };
 
-        const _dropzone = document.querySelector('.dropzone');
+        const _dropzone = document.body;
         const _files = document.querySelector('.files');
         const validate = (fileData) => {
             return new Promise((resolve, reject) => {
@@ -310,7 +310,6 @@
                             _warning.appendChild(_warningGroup);
                             for (const warningLine of warningLines) {
                                 const [ message, ... args ] = warningLine;
-                                console.log({warningLine, message, args});
                                 let html = htmlEncode(message);
                                 for (let i = 0; i < args.length; i++) {
                                     const tokenKey = `$$${i + 1}`;
@@ -327,7 +326,6 @@
                         }
                     }
                 }
-                console.log({ result });
             }
         });
     </script>

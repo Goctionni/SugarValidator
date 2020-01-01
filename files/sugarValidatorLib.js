@@ -8,6 +8,7 @@ function validate(fileData) {
         '&quot;': '"',
         '&#39;': `'`,
         '&amp;': '&',
+        '\t': '  ',
     };
     function decodeHTML(encodedStr) {
         const input = Object.keys(entityMap);
@@ -47,6 +48,8 @@ function validate(fileData) {
         ['"""', '"""', 'Markup escape'],
         ['<nowiki>', '</nowiki>', 'Markup escape'],
         ['{{{', '}}}', 'Markup escape'],
+        ['/*', '*/', 'Markup escape'],
+        ['<!--', '-->', 'Markup escape'],
         ['<<script>>', '<</script>>', 'Script']
     ];
     function recodeExcludedHTML(html, header) {
@@ -222,6 +225,8 @@ function validate(fileData) {
             '<<setplaylist': '<<createplaylist',
             '<<stopallaudio>>': '<<audio ":all" stop>>',
             '<<display': '<<include',
+            '<<forget': 'forget()',
+            '<<remember': 'memorize() or recall()',
             'state.active.variables': 'State.variables',
             'State.initPRNG(': 'State.prng.init(',
             '.containsAll(': '.includesAll(',
@@ -243,6 +248,7 @@ function validate(fileData) {
             '.containsAll(': '.includesAll(',
             '.containsAny(': '.includesAny(',
             '.flatten(': '.flat(',
+            'macros.': 'Macro.add(',
         };
         let curIndex = fileData.indexOf('id="twine-user-script"');
         const maxIndex = fileData.indexOf('</script>', curIndex);
@@ -263,8 +269,134 @@ function validate(fileData) {
             }
         }
     }
+
+    // ['script', 'widget', 'for', 'link', 'button']
+    const allMacros = {
+        // Native macros
+        switch: { closed: true, sub: [ 'case', 'default'] },
+        for: { closed: true, sub: [ 'break', 'continue'] },
+        repeat: { closed: true, sub: [ 'stop' ] },
+        cycle: { closed: true, sub: [ 'option', 'optionsfrom ']},
+        listbox: { closed: true, sub: [ 'option', 'optionsfrom ']},
+        timed: { closed: true, sub: [ 'next' ]},
+    };
+    function addSimpleMacro(name, closed) {
+        allMacros[name] = { closed, sub: closed ? [] : undefined };
+    }
+    // Closed
+    ['capture', 'script', 'nobr', 'silently', 'button', 'link', 'linkappend', 'linkprepend', 'linkreplace', 'append', 'prepend', 'replace', 'createaudiogroup', 'createplaylist', 'widget'].forEach((name) => addSimpleMacro(name, true));
+    // Unclosed
+    ['set', 'unset', 'run', '=', '-', 'include', 'print', 'checkbox', 'radiobutton', 'textarea', 'textbox', 'actions', 'back', 'choice', 'return', 'addclass'].forEach((name) => addSimpleMacro(name, false));
+    ['copy', 'remove', 'removeclass', 'toggleclass', 'audio', 'cacheaudio', 'playlist', 'masteraudio', 'removeplaylist', 'waitforaudio', 'goto'].forEach((name) => addSimpleMacro(name, false));
+
+    let failedToParseAllMacros = false;
+    function tryEvalMacro(script) {
+        const Macro = {
+            add(name, { tags }) {
+                return { name , tags };
+            }
+        }
+        try {
+            return eval(script);
+        } catch (e) {
+            return false;
+        }
+    }
+    function findAllCustomMacros() {
+        const scriptStartIndex = fileData.indexOf('id="twine-user-script"');
+        if (scriptStartIndex === -1) return;
+        const scriptEndIndex = fileData.indexOf('</script>', scriptStartIndex);
+        if (scriptEndIndex === -1) return;
+        const userscript = fileData.substring(scriptStartIndex, scriptEndIndex);
+        const macroStartSyntax = 'Macro.add(';
+        let startIndex = 0;
+        while(true) {
+            const index = userscript.indexOf(macroStartSyntax, startIndex);
+            if (index === -1) return;
+            let innerStartIndex = startIndex = index + macroStartSyntax.length;
+            while(true) {
+                let attempt = 0;
+                const possibleEndIndex = userscript.indexOf(')', innerStartIndex);
+                const macroCode = userscript.substring(index, possibleEndIndex + 1);
+                const result = tryEvalMacro(macroCode);
+                if (result !== false) {
+                    const { name , tags } = result;
+                    allMacros[name] = { closed: (typeof tags !== 'undefined'), sub: tags };
+                    startIndex = possibleEndIndex + 1;
+                    break;
+                } else {
+                    innerStartIndex = possibleEndIndex + 1;
+                    if (attempt++ > 100) {
+                        failedToParseAllMacros = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    const allWidgets = [];
+    let failedToParseAllWidgets = false;
+    function findAllWidgets(html, passage) {
+        // Find our tags
+        const tags = getHTMLAttr(passage.header, 'tags');
+        // If none of this passage's tags is widget, we dont need to check if there are any widgets
+        if (tags.split(' ').indexOf('widget') === -1) return;
+        // Find all widgets
+        let startIndex = 0;
+        while (true) {
+            const find = '<<widget ';
+            const index = html.indexOf(find, startIndex);
+            if (index === -1) return;
+            let widgetName = html.substr(index + find.length).trim().split(' ').shift().split('>').shift().split('\n').shift();
+            if (widgetName[0] === '"' && widgetName[widgetName.length - 1] === '"') widgetName = widgetName.substring(1, widgetName.length - 1);
+            else if (widgetName[0] === '$') failedToParseAllWidgets = true;
+            if (allWidgets.indexOf(widgetName) === -1) allWidgets.push(widgetName);
+            startIndex = index + find.length + widgetName.length;
+        }
+    }
+
+    const excludeTags = ['if', 'else', 'elseif', 'endif', 'click', 'endclick', 'endnobr', 'endsilently', 'endfor', 'endscript', 'endbutton', 'endappend', 'endprepend', 'endreplace', 'endwidget', 'setplaylist', 'stopallaudio', 'display', 'remember', 'forget'];
+    function findAllTags(html, passage) {
+        let ignoreTagInRange = [];
+        let startIndex = 0;
+        while(true) {
+            const index = html.indexOf('<<', startIndex);
+            if (index === -1) return;
+            const tagName = html.substr(index + 2).split(' ').shift().split('>').shift().split('\n').shift();
+            if (tagName[0] !== '/' && excludeTags.indexOf(tagName) === -1) {
+                if (!ignoreTagInRange.some((item) => item.tag === tagname && index > item.range[0] && index < item.range[1])) {
+                    const closeTagIndex = html.substr(index).indexOf('<</' + tagName + '>>');
+                    const isClosed = closeTagIndex !== -1;
+                    const isWidget = allWidgets.indexOf(tagName) !== -1;
+                    const isMacro = allMacros[tagName];
+                    if (!isMacro && !isWidget) {
+                        return throwError(`<<${tagName} found, but could not find macro or widget definition for tagname`, passage);
+                    } else {
+                        const shouldBeClosed = isWidget ? false : (isMacro && isMacro.closed);
+                        if (isMacro && isMacro.sub && isMacro.sub.length) {
+                            for (const subtag of isMacro.sub) {
+                                ignoreTagInRange.push({ tag: subtag, range: [index, closeTagIndex] });
+                            }
+                        }
+                        if (isClosed !== shouldBeClosed) {
+                            if (isClosed) return throwError(`Macro '${tagName}' should not be closed, but was`, passage);
+                            if (shouldBeClosed) return throwError(`Macro '${tagName}' should be closed, but was not`, passage);
+                        }
+                    }
+                }
+            }
+            startIndex = index + tagName.length + 1;
+        }
+    }
+
+    // First find all widgets and macros, so we can validate them later
+    findAllCustomMacros()
+    for (const passage of passages) {
+        findAllWidgets(passage.content, passage);
+    }
     
-    for(const passage of passages) {
+    for (const passage of passages) {
         try {
             matchQuotes(passage.content, passage);
             matchGTLT(passage.content, passage);
@@ -272,6 +404,7 @@ function validate(fileData) {
             findDeprecatedInPassage(passage.content, passage);
             findInvalidConditions(passage.content, passage);
             checkInvalidWidgets(passage.content, passage);
+            findAllTags(passage.content, passage);
         } catch(e) {
             errorsFound = true;
         }
@@ -279,6 +412,8 @@ function validate(fileData) {
     findDeprecatedInScript();
     
     return {
+        failedToParseAllMacros,
+        failedToParseAllWidgets,
         errors: validationErrors,
         warnings: validationWarnings,
     };
