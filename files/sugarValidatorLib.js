@@ -111,7 +111,6 @@ function validate(fileData) {
         const name = getHTMLAttr(header, 'name');
         const passage = { header, content, id, name };
     
-    
         // Add stuff
         passages.push(passage);
         if (name) passageNameIndex[name] = passage;
@@ -139,22 +138,25 @@ function validate(fileData) {
     }
     
     function matchGTLT(html, passage) {
+        let htmlClone = html;
         while(true) {
-            const start = html.lastIndexOf('<<');
-            const end = html.indexOf('>>', start);
+            const start = htmlClone.lastIndexOf('<<');
+            const end = htmlClone.indexOf('>>', start);
             if (start === -1 && end === -1) return;
             if (start === -1 || end === -1) {
-                let partial;
                 if (start !== -1) {
-                    partial = html.substr(start, 40);
-                    return throwError(`Found an opening '<<' without matching '>>' (${partial})`, passage);
-                }
-                if (end !== -1) {
-                    partial = html.substr(end - 20, 40);
-                    return throwError(`Found a closing '>>' without matching '<<' (${partial})`, passage);
+                    const lineend = html.indexOf('\n', start);
+                    const linestart = html.substr(0, lineend).lastIndexOf('\n');
+                    const line = html.substring(linestart, lineend).trim().substr(0, 160);
+                    return throwError(`Found an opening '<<' without matching '>>' Line: ${line}`, passage);
+                } else {
+                    const lineend = html.indexOf('\n', end);
+                    const linestart = html.substr(0, lineend).lastIndexOf('\n');
+                    const line = html.substring(linestart, lineend).trim().substr(0, 160);
+                    return throwError(`Found a closing '>>' without matching '<<' Line: ${line}`, passage);
                 }
             }
-            html = html.substr(0, start) + html.substr(end + 2);
+            htmlClone = htmlClone.substr(0, start) + '{{' + htmlClone.substring(start + 2, end) + '}}' + htmlClone.substr(end + 2);
         }
     }
     
@@ -251,10 +253,11 @@ function validate(fileData) {
             '.flatten(': '.flat(',
             'macros.': 'Macro.add(',
         };
-        let curIndex = fileData.indexOf('id="twine-user-script"');
-        const maxIndex = fileData.indexOf('</script>', curIndex);
+        const initialIndex = fileData.indexOf('id="twine-user-script"');
+        const maxIndex = fileData.indexOf('</script>', initialIndex);
         const deprecationKeys = Object.keys(deprecationMap);
         for (const key of deprecationKeys) {
+            let curIndex = initialIndex;
             while(true) {
                 const startIndex = fileData.indexOf(key, curIndex);
                 if (startIndex === -1) break;
@@ -269,10 +272,12 @@ function validate(fileData) {
                 const endOfLineIndex = fileData.indexOf('\n', startIndex);
                 const lines = fileData.substring(0, endOfLineIndex).split('\n');
                 const line = lines[lines.length - 1].trim();
-                addWarning([
-                    ['Line $$1: $$2', lines.length, line],
-                    ["'$$1' should be '$$2'", key, deprecationMap[key]],
-                ], 'Deprecated code found in Twine User-script');
+                if (!line.startsWith('//') && !line.startsWith('/*')) {
+                    addWarning([
+                        ['Line $$1: $$2', lines.length, line],
+                        ["'$$1' should be '$$2'", key, deprecationMap[key]],
+                    ], 'Deprecated code found in Twine User-script');
+                }
                 curIndex = startIndex + key.length;
             }
         }
@@ -324,8 +329,8 @@ function validate(fileData) {
             const index = userscript.indexOf(macroStartSyntax, startIndex);
             if (index === -1) return;
             let innerStartIndex = startIndex = index + macroStartSyntax.length;
+            let attempt = 0;
             while(true) {
-                let attempt = 0;
                 const possibleEndIndex = userscript.indexOf(')', innerStartIndex);
                 const macroCode = userscript.substring(index, possibleEndIndex + 1);
                 const result = tryEvalMacro(macroCode);
@@ -338,6 +343,76 @@ function validate(fileData) {
                     innerStartIndex = possibleEndIndex + 1;
                     if (attempt++ > 100) {
                         failedToParseAllMacros = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    function findAllCustomMacrosDeprecated() {
+        const scriptStartIndex = fileData.indexOf('id="twine-user-script"');
+        if (scriptStartIndex === -1) return;
+        const scriptEndIndex = fileData.indexOf('</script>', scriptStartIndex);
+        if (scriptEndIndex === -1) return;
+        let userscript = fileData.substring(scriptStartIndex, scriptEndIndex);
+        while(true) {
+            const match = userscript.match(/macros\s*\.([a-zA-Z][a-zA-Z0-9_]*)\s*=\s*{/);
+            if (!match) break;
+            
+            const fullStr = match[0];
+            const macroName = match[1];
+            const innerStartIndex = match.index + fullStr.length - 1;
+            let innerEndIndexMinBound = innerStartIndex;
+            let attempt = 0;
+            while(true) {
+                const possibleEndIndex = userscript.indexOf('}', innerEndIndexMinBound);
+                const macroCodeObj = userscript.substring(innerStartIndex, possibleEndIndex + 1);
+                const macroCode = `Macro.add('${macroName}', ${macroCodeObj})`;
+                const result = tryEvalMacro(macroCode);
+                if (result !== false) {
+                    const { name , tags } = result;
+                    allMacros[name] = { closed: (typeof tags !== 'undefined'), sub: tags };
+                    userscript = userscript.substr(innerStartIndex);
+                    break;
+                } else {
+                    innerEndIndexMinBound = possibleEndIndex + 1;
+                    if (attempt++ > 100) {
+                        userscript = userscript.substr(innerStartIndex);
+                        failedToParseAllMacros = true;
+                        console.error('Could not find custom macro', macroName, macroCode);
+                        break;
+                    }
+                }
+            }
+        }
+
+        userscript = fileData.substring(scriptStartIndex, scriptEndIndex);
+        while(true) {
+            const match = userscript.match(/macros\s*\[['"]([a-zA-Z][a-zA-Z0-9_]*)["']\]\s*=\s*{/);
+            if (!match) break;
+            
+            const fullStr = match[0];
+            const macroName = match[1];
+            const innerStartIndex = match.index + fullStr.length - 1;
+            let innerEndIndexMinBound = innerStartIndex;
+            let attempt = 0;
+            while(true) {
+                const possibleEndIndex = userscript.indexOf('}', innerEndIndexMinBound);
+                const macroCodeObj = userscript.substring(innerStartIndex, possibleEndIndex + 1);
+                const macroCode = `Macro.add('${macroName}', ${macroCodeObj})`;
+                const result = tryEvalMacro(macroCode);
+                if (result !== false) {
+                    const { name , tags } = result;
+                    allMacros[name] = { closed: (typeof tags !== 'undefined'), sub: tags };
+                    userscript = userscript.substr(innerStartIndex);
+                    break;
+                } else {
+                    innerEndIndexMinBound = possibleEndIndex + 1;
+                    if (attempt++ > 100) {
+                        userscript = userscript.substr(innerStartIndex);
+                        failedToParseAllMacros = true;
+                        console.error('Could not find custom macro', macroName, macroCode);
                         break;
                     }
                 }
@@ -405,7 +480,8 @@ function validate(fileData) {
     }
 
     // First find all widgets and macros, so we can validate them later
-    findAllCustomMacros()
+    findAllCustomMacros();
+    findAllCustomMacrosDeprecated();
     for (const passage of passages) {
         findAllWidgets(passage.content, passage);
     }
@@ -424,7 +500,7 @@ function validate(fileData) {
         }
     }
     findDeprecatedInScript();
-    
+
     return {
         failedToParseAllMacros,
         failedToParseAllWidgets,
