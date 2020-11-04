@@ -1,0 +1,27 @@
+{
+  "name": "sugarvalidator",
+  "version": "1.0.0",
+  "description": "Tool to validate SugarCube games and automatically detect errors",
+  "main": "index.js",
+  "bin": "cli.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Goctionni/SugarValidator.git"
+  },
+  "keywords": [
+    "sugarcube",
+    "twine",
+    "validator",
+    "error",
+    "warning"
+  ],
+  "author": "Goctionni",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Goctionni/SugarValidator/issues"
+  },
+  "homepage": "https://github.com/Goctionni/SugarValidator#readme"
+}
