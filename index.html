@@ -203,7 +203,7 @@
                     resolve(result.data);
                     worker.terminate();
                 };
-                worker.postMessage(fileData);
+                worker.postMessage({ fileData, localStorage: localStorage.ignore ? JSON.parse(localStorage.ignore) : {} });
             });
         };
 
